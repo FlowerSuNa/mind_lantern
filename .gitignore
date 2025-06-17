@@ -1,2 +1,8 @@
 .venv
+.env
+
 *.vtt
+*.txt
+*.json
+
+uv.lock
