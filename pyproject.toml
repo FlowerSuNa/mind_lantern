@@ -7,6 +7,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "chromadb>=1.0.12",
     "dotenv>=0.9.9",
+    "gradio>=5.34.1",
     "ipykernel>=6.29.5",
     "langchain>=0.3.25",
     "langchain-community>=0.3.25",
