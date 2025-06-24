@@ -1,5 +1,5 @@
 import gradio as gr
-import uuid
+import os
 import asyncio
 
 from dotenv import load_dotenv
@@ -29,6 +29,8 @@ from langchain_core.documents import Document
 from typing import List, Dict
 
 COLLECTION_NAME = "content-250623"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # ------------------------- Confirm and Load Model -------------------------
 
@@ -52,16 +54,18 @@ def get_llm(api_key: str):
 
 def comfirm_api_key(opnenai_api_key: str, gemini_api_key: str):
     """ API Key 검증 및 모델 로드 """
-    state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
     try:
+        state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
         embeddings = get_embeddings(opnenai_api_key)
         llm = get_llm(gemini_api_key)
-        return gr.update(visible=False), gr.update(visible=True), state, embeddings, llm
 
     except Exception as e:
         print(e)
         state = "❌ 올바른 API Key를 입력해주세요"
-        return gr.update(visible=True), gr.update(visible=False), state, None, None
+        embeddings = get_embeddings(OPENAI_API_KEY)
+        llm = get_llm(GOOGLE_API_KEY)
+    
+    return state, embeddings, llm
     
 
 # ------------------------- Chain Definition -------------------------
@@ -201,16 +205,16 @@ def main():
     """ 챗봇 인터페이스 생성 """
     with gr.Blocks() as demo:
         history = gr.State([])
-        embeddings = gr.State(None)
-        llm = gr.State(None)
+        embeddings = gr.State(get_embeddings(OPENAI_API_KEY))
+        llm = gr.State(get_llm(GOOGLE_API_KEY))
 
         gr.Markdown('## 🤖 법륜스님 [즉문즉설] 스타일 답변받기')
         gr.Markdown('질문을 입력하면 [즉문즉설] 유튜브 내용 기반으로 답변을 생성합니다.')
         gr.Markdown("📌 이 봇은 법륜스님의 [즉문즉설]에서 영감을 받은 비공식 LLM 프로젝트로, 특정 인물과 무관하며 상업 목적 없이 연구·실험용으로 제작되었습니다.")
+        gr.Markdown("⚠️ 기본 키로 동작하지만, **많은 사용량** 또는 **민감한 요청**은 **개인 키** 사용을 권장합니다.")
 
         # API Key 인증
-        with gr.Column(visible=True) as key_input_area:
-            gr.Markdown("🔐 **API Key를 먼저 입력해주세요.**")
+        with gr.Accordion("🔐 개인 키 등록하기", open=False):
             gr.Markdown("질문에 대한 임베딩(벡터화)은 **OpenAI**의 텍스트 임베딩 모델을 활용하고, 최종 응답 생성을 위한 LLM은 **Gemini** 모델을 사용합니다.")
             openai_api_key_box = gr.Textbox(
                 placeholder="OpenAI API Key...", 
@@ -232,39 +236,39 @@ def main():
                 show_label=False
             )
 
-        with gr.Column(visible=False) as chat_area:
-            with gr.Row(): 
-                with gr.Column(scale=1):
-                    # 입력창 정의
-                    input_box = gr.Textbox(
-                        placeholder="질문을 입력하세요...",
-                        lines=6,
-                        max_lines=20,
-                        scale=1,
-                        show_label=False,
-                        autofocus=True
-                    )
+        # 채팅 창
+        with gr.Row(): 
+            with gr.Column(scale=1):
+                # 입력창 정의
+                input_box = gr.Textbox(
+                    placeholder="질문을 입력하세요...",
+                    lines=6,
+                    max_lines=20,
+                    scale=1,
+                    show_label=False,
+                    autofocus=True
+                )
 
-                    # 예제 버튼 영역
-                    example_questions=[
-                        ["계속 불만이 생겨요. 어떻게 해야 할까요?"],
-                        ["마음에 안드는 사람이 있어요. 어떻게 하면 좋을까요?"],
-                        ["욕심이 계속 많아져요. 욕심이 왜 많아질까요? 욕심을 멈출 수 있을까요?"]
-                    ]
-                    with gr.Row():
-                        for idx, question in enumerate(example_questions):
-                            gr.Button(value=question).click(
-                                fn=lambda q=question: q,  # 기본값으로 클로저 문제 해결
-                                outputs=input_box,
-                                show_progress=False
-                            )
-                    
-                    # 버튼 정의
-                    with gr.Row():
-                        send_button = gr.Button("질문하기", variant="primary", scale=1)
+                # 예제 버튼 영역
+                example_questions=[
+                    ["계속 불만이 생겨요. 어떻게 해야 할까요?"],
+                    ["마음에 안드는 사람이 있어요. 어떻게 하면 좋을까요?"],
+                    ["욕심이 계속 많아져요. 욕심이 왜 많아질까요? 욕심을 멈출 수 있을까요?"]
+                ]
+                with gr.Row():
+                    for idx, question in enumerate(example_questions):
+                        gr.Button(value=question).click(
+                            fn=lambda q=question: q,  # 기본값으로 클로저 문제 해결
+                            outputs=input_box,
+                            show_progress=False
+                        )
+                
+                # 버튼 정의
+                with gr.Row():
+                    send_button = gr.Button("질문하기", variant="primary", scale=1)
 
-                with gr.Column(scale=2):
-                    recent_answer = gr.Textbox(label="최근 답변", interactive=False, lines=5)
+            with gr.Column(scale=2):
+                recent_answer = gr.Textbox(label="최근 답변", interactive=False, lines=5)
 
             with gr.Accordion("📜 이전 대화 보기", open=False):
                 gr.Chatbot(lambda h: get_history(h), inputs=history, label="대화 히스토리",  interactive=False)
@@ -275,23 +279,15 @@ def main():
         key_submit_button.click(
             fn=comfirm_api_key,
             inputs=[openai_api_key_box, gemini_api_key_box],
-            outputs=[key_input_area, chat_area, key_status, embeddings, llm]
+            outputs=[key_status, embeddings, llm]
         )
 
-        if embeddings and llm:
-            response_fn = make_chain(embeddings, llm)
-            send_button.click(
-                fn=response_fn,
-                inputs=[input_box, history],
-                outputs=[recent_answer, history]
-            )
-        else:
-            send_button.click(
-                fn=None,
-                inputs=[],
-                outputs=[],
-                js="alert('⚠️ API Key 인증을 해주세요.')"
-            )
+        response_fn = make_chain(embeddings, llm)
+        send_button.click(
+            fn=response_fn,
+            inputs=[input_box, history],
+            outputs=[recent_answer, history]
+        )
 
 
     # 데모 실행
