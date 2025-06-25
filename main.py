@@ -4,7 +4,6 @@ import asyncio
 
 from dotenv import load_dotenv
 from textwrap import dedent
-from pydantic import BaseModel, Field
 
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -17,16 +16,18 @@ from langchain_core.prompts import (
     MessagesPlaceholder
 )
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import (
     RunnableMap, 
     RunnablePassthrough, 
     RunnableLambda
 )
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.documents import Document
 from typing import List, Dict
+
+# ------------------------- Environment Setting -------------------------
+
+load_dotenv()
 
 COLLECTION_NAME = "content-250623"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -36,37 +37,29 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 def get_embeddings(api_key: str):
     """ 임베딩 모델 반환 """
-    return OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        openai_api_key=api_key,
-        dimensions=1536
-    )
+    try:
+        model = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            openai_api_key=api_key,
+            dimensions=1536
+        )
+        return model
+    except Exception as e:
+        return None
 
 
 def get_llm(api_key: str):
     """ LLM 모델 반환 """
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=api_key,
-        temperature=0.1
-    )
-
-
-def comfirm_api_key(opnenai_api_key: str, gemini_api_key: str):
-    """ API Key 검증 및 모델 로드 """
     try:
-        state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
-        embeddings = get_embeddings(opnenai_api_key)
-        llm = get_llm(gemini_api_key)
-
+        model = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            google_api_key=api_key,
+            temperature=0.1
+        )
+        return model
     except Exception as e:
-        print(e)
-        state = "❌ 올바른 API Key를 입력해주세요"
-        embeddings = get_embeddings(OPENAI_API_KEY)
-        llm = get_llm(GOOGLE_API_KEY)
-    
-    return state, embeddings, llm
-    
+        return None
+
 
 # ------------------------- Chain Definition -------------------------
 
@@ -159,54 +152,80 @@ def get_rag_chain(prompt, retriever, llm):
     )
     return chain
 
+# ------------------------- Action Function -------------------------
 
-# ------------------------- Response -------------------------
+def confirm_api_key(openai_api_key: str, gemini_api_key: str):
+    """ API Key 검증 및 모델 로드 """
+    try:
+        state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
+        embeddings = get_embeddings(openai_api_key)
+        llm = get_llm(gemini_api_key)
 
-def make_chain(embeddings, llm):
+    except Exception as e:
+        print(e)
+        state = "❌ 올바른 API Key를 입력해주세요"
+        embeddings = get_embeddings(OPENAI_API_KEY)
+        llm = get_llm(GOOGLE_API_KEY)
+
     prompt = get_prompt()
     retriever = get_retriever(embeddings)
     chain = get_rag_chain(prompt, retriever, llm)
-
-    async def get_response(message: str, history: List):       
-        response = chain.astream(
-            {"question": message, "history": history},
-        )
-        full_response = ""
-
-        async for chunk in response:
-            full_response += chunk
-            await asyncio.sleep(0.01)  # 너무 빠를 경우 살짝 지연
-            yield full_response, history  # 부분 응답을 계속 출력
-
-        history.append(HumanMessage(content=message))
-        history.append(AIMessage(content=full_response))
-        yield full_response, history # 최종 응답
-    return get_response
+    return state, chain
 
 
-def get_history(history):
+async def get_response(message: str, history: List, chain):
+    if chain is None:
+        _, chain = confirm_api_key(OPENAI_API_KEY, GOOGLE_API_KEY)
+
+    response = chain.astream(
+        {"question": message, "history": history}
+    )
+    full_response = ""
+
+    async for chunk in response:
+        full_response += chunk
+        await asyncio.sleep(0.01)  # 너무 빠를 경우 살짝 지연
+        yield full_response, history, chain  # 부분 응답을 계속 출력
+
+    history.append(HumanMessage(content=message))
+    history.append(AIMessage(content=full_response))
+    yield full_response, history, chain # 최종 응답
+
+
+def get_history(history: List):
     """  """
-    chat_history = []
+    pairs = []
+    user_message = None
+    assistant_message = None
+
     for message in history:
         role = message.type
 
         if role == "human":
-            _role = "user"
-        elif role == "ai":
-            _role = "assistant"
-        else:
-            _role = role
+            # 이전 user_message가 남아있고, ai 없이 다음 human이 오는 경우
+            if user_message is not None:
+                pairs.append((user_message, None))
 
-        chat_history.append(gr.ChatMessage(role=_role, content=message.text()))
-    return chat_history
+            user_message = message.content
+            assistant_message = None
+
+        elif role == "ai":
+            assistant_message = message.content
+            pairs.append((user_message, assistant_message))
+            user_message = None
+            assistant_message = None
+
+    if user_message is not None:
+        pairs.append((user_message, None))
+
+    return pairs
 
 
 def main():
     """ 챗봇 인터페이스 생성 """
     with gr.Blocks() as demo:
         history = gr.State([])
-        embeddings = gr.State(get_embeddings(OPENAI_API_KEY))
-        llm = gr.State(get_llm(GOOGLE_API_KEY))
+        chain = gr.State(None)
 
         gr.Markdown('## 🤖 법륜스님 [즉문즉설] 스타일 답변받기')
         gr.Markdown('질문을 입력하면 [즉문즉설] 유튜브 내용 기반으로 답변을 생성합니다.')
@@ -235,12 +254,18 @@ def main():
                 label="", 
                 show_label=False
             )
+            key_submit_button.click(
+                fn=confirm_api_key,
+                inputs=[openai_api_key_box, gemini_api_key_box],
+                outputs=[key_status, chain]
+            )
 
         # 채팅 창
         with gr.Row(): 
             with gr.Column(scale=1):
                 # 입력창 정의
                 input_box = gr.Textbox(
+                    label="질문",
                     placeholder="질문을 입력하세요...",
                     lines=6,
                     max_lines=20,
@@ -251,49 +276,49 @@ def main():
 
                 # 예제 버튼 영역
                 example_questions=[
-                    ["계속 불만이 생겨요. 어떻게 해야 할까요?"],
-                    ["마음에 안드는 사람이 있어요. 어떻게 하면 좋을까요?"],
-                    ["욕심이 계속 많아져요. 욕심이 왜 많아질까요? 욕심을 멈출 수 있을까요?"]
+                    "계속 불만이 생겨요. 어떻게 해야 할까요?",
+                    "마음에 안드는 사람이 있어요. 어떻게 하면 좋을까요?",
+                    "욕심이 계속 많아져요. 욕심이 왜 많아질까요? 욕심을 멈출 수 있을까요?",
+                    "자존감이 떨어지고, 마음이 늘 불안합니다. 어떻게 해야 할까요?"
                 ]
                 with gr.Row():
                     for idx, question in enumerate(example_questions):
-                        gr.Button(value=question).click(
+                        btn = gr.Button(value=question)
+                        btn.click(
                             fn=lambda q=question: q,  # 기본값으로 클로저 문제 해결
-                            outputs=input_box,
-                            show_progress=False
+                            outputs=[input_box],
                         )
                 
-                # 버튼 정의
+                # 응답 요청 버튼
                 with gr.Row():
                     send_button = gr.Button("질문하기", variant="primary", scale=1)
 
             with gr.Column(scale=2):
-                recent_answer = gr.Textbox(label="최근 답변", interactive=False, lines=5)
+                recent_answer = gr.Textbox(label="답변", interactive=False, lines=5)
 
-            with gr.Accordion("📜 이전 대화 보기", open=False):
-                gr.Chatbot(lambda h: get_history(h), inputs=history, label="대화 히스토리",  interactive=False)
+        with gr.Accordion("📜 이전 대화 보기", open=False):
+            chatbot_display = gr.Chatbot(label="대화 히스토리", value=[], show_copy_button=True)
 
         gr.Markdown("🛠️ LangChain · OpenAI · Gemini · Chroma · Gradio", elem_id="tool-badge")
         
-        # 버튼 클릭 액션
-        key_submit_button.click(
-            fn=comfirm_api_key,
-            inputs=[openai_api_key_box, gemini_api_key_box],
-            outputs=[key_status, embeddings, llm]
-        )
-
-        response_fn = make_chain(embeddings, llm)
+        # 응답 생성
         send_button.click(
-            fn=response_fn,
-            inputs=[input_box, history],
-            outputs=[recent_answer, history]
+            fn=get_response,
+            inputs=[input_box, history, chain],
+            outputs=[recent_answer, history, chain]
         )
 
-
+        # 대화 히스토리 관리
+        send_button.click(
+            fn=get_history,
+            inputs=[history],
+            outputs=[chatbot_display]
+        )
+        
     # 데모 실행
     demo.launch()
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    
     main()
