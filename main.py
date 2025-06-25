@@ -37,28 +37,19 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 def get_embeddings(api_key: str):
     """ 임베딩 모델 반환 """
-    try:
-        model = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            openai_api_key=api_key,
-            dimensions=1536
-        )
-        return model
-    except Exception as e:
-        return None
-
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        openai_api_key=api_key,
+        dimensions=1536
+    )
 
 def get_llm(api_key: str):
     """ LLM 모델 반환 """
-    try:
-        model = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=api_key,
-            temperature=0.1
-        )
-        return model
-    except Exception as e:
-        return None
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=api_key,
+        temperature=0.1
+    )
 
 
 # ------------------------- Chain Definition -------------------------
@@ -91,7 +82,7 @@ def parsing_documents(documents: List[Document]) -> Dict[str, str]:
         content = f"주제 : {doc.metadata.get('title')}\n{doc.page_content}"
         context.append(content)
 
-        info = f"주제 : {doc.metadata.get('title')}\n{doc.metadata.get('video_url')}"
+        info = f"[{doc.metadata.get('title')}]({doc.metadata.get('video_url')})"
         urls.append(info)
     return {
         'context': '\n\n'.join(context),
@@ -148,7 +139,7 @@ def get_rag_chain(prompt, retriever, llm):
         "inputs": RunnablePassthrough(),
         "answer": prompt | llm | StrOutputParser()
     } | RunnableLambda(
-        lambda x: x["answer"] + "\n\n[출처]\n" + x["inputs"]["urls"]   
+        lambda x: x["answer"] + "\n\n[유튜브 출처/링크]\n" + x["inputs"]["urls"]   
     )
     return chain
 
@@ -156,43 +147,28 @@ def get_rag_chain(prompt, retriever, llm):
 
 def confirm_api_key(openai_api_key: str, gemini_api_key: str):
     """ API Key 검증 및 모델 로드 """
-    try:
+
+    embeddings = get_embeddings(openai_api_key)
+    llm = get_llm(gemini_api_key)
+
+    try: 
+        retriever = get_retriever(embeddings)
+        llm.get_num_tokens('연결 테스트')
         state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
-        embeddings = get_embeddings(openai_api_key)
-        llm = get_llm(gemini_api_key)
 
     except Exception as e:
         print(e)
-        state = "❌ 올바른 API Key를 입력해주세요"
+        state = "❌ 올바른 API Key를 입력해주세요."
         embeddings = get_embeddings(OPENAI_API_KEY)
+        retriever = get_retriever(embeddings)
         llm = get_llm(GOOGLE_API_KEY)
 
     prompt = get_prompt()
-    retriever = get_retriever(embeddings)
     chain = get_rag_chain(prompt, retriever, llm)
     return state, chain
 
 
-async def get_response(message: str, history: List, chain):
-    if chain is None:
-        _, chain = confirm_api_key(OPENAI_API_KEY, GOOGLE_API_KEY)
-
-    response = chain.astream(
-        {"question": message, "history": history}
-    )
-    full_response = ""
-
-    async for chunk in response:
-        full_response += chunk
-        await asyncio.sleep(0.01)  # 너무 빠를 경우 살짝 지연
-        yield full_response, history, chain  # 부분 응답을 계속 출력
-
-    history.append(HumanMessage(content=message))
-    history.append(AIMessage(content=full_response))
-    yield full_response, history, chain # 최종 응답
-
-
-def get_history(history: List):
+def parsing_history(history: List):
     """  """
     pairs = []
     user_message = None
@@ -221,31 +197,103 @@ def get_history(history: List):
     return pairs
 
 
+def get_history(message:str , history: List):
+    chatbot_display = parsing_history(history)
+    return chatbot_display.append((message, None))
+
+
+async def get_response(message: str, history: List, chain):
+    if chain is None:
+        _, chain = confirm_api_key(OPENAI_API_KEY, GOOGLE_API_KEY)
+
+    chatbot_display = parsing_history(history)
+    yield chatbot_display + [(message, "📝 답변 생성 중...")], history, chain, message
+
+    try:
+        response = chain.astream(
+            {"question": message, "history": history}
+        )
+        full_response = ""
+
+        async for chunk in response:
+            full_response += chunk
+            await asyncio.sleep(0.01)  # 너무 빠를 경우 살짝 지연
+            yield chatbot_display + [(message, full_response)], history, chain, message  # 부분 응답을 계속 출력
+
+    except Exception as e:
+        print(e)
+        full_response = "⚠️ API 사용량이 초과되었습니다."
+
+    history.append(HumanMessage(content=message))
+    history.append(AIMessage(content=full_response))
+    chatbot_display.append((message, full_response))
+    yield chatbot_display, history, chain, "" # 최종 응답
+
+
 def main():
     """ 챗봇 인터페이스 생성 """
-    with gr.Blocks() as demo:
+    with gr.Blocks(
+        css=dedent(
+            """
+            .same-height { height: 70px !important; }
+                    
+            #input-box {
+                height: 50vh !important;
+                display: flex !important;
+                flex-direction: column !important;
+            }
+                    
+            #input-box textarea {
+                flex-grow: 1 !important;
+                height: 45vh !important;
+                box-sizing: border-box !important;
+                padding: 12px !important;
+                font-size: 16px;
+                line-height: 1.5;
+                resize: none !important;
+                overflow-y: auto !important;
+                white-space: pre-wrap !important;
+            }
+
+            #chatbot-box {
+                height: 70vh !important;     /* 화면 높이의 70% */
+                max-height: 70vh !important;
+                overflow-y: auto !important;
+            }
+            """
+        )
+    ) as demo:
         history = gr.State([])
         chain = gr.State(None)
 
-        gr.Markdown('## 🤖 법륜스님 [즉문즉설] 스타일 답변받기')
-        gr.Markdown('질문을 입력하면 [즉문즉설] 유튜브 내용 기반으로 답변을 생성합니다.')
-        gr.Markdown("📌 이 봇은 법륜스님의 [즉문즉설]에서 영감을 받은 비공식 LLM 프로젝트로, 특정 인물과 무관하며 상업 목적 없이 연구·실험용으로 제작되었습니다.")
-        gr.Markdown("⚠️ 기본 키로 동작하지만, **많은 사용량** 또는 **민감한 요청**은 **개인 키** 사용을 권장합니다.")
+        gr.Markdown('## 🤖 법륜스님 [즉문즉설] 스타일 지혜 받기')
+        gr.Textbox(
+            dedent(
+                """
+                ❤️ 질문을 입력하면 [즉문즉설] 유튜브 내용을 기반으로 답변을 생성합니다.
+                📌 이 봇은 법륜스님의 [즉문즉설]에서 영감을 받은 비공식 LLM 프로젝트로, 특정 인물과 무관하며 상업 목적 없이 연구·실험용으로 제작되었습니다.
+                ⚠️ 기본 키로 동작하지만, 많은 사용량 또는 민감한 요청은 개인 키 사용을 권장합니다.
+                """
+            ).strip,
+            show_label=False,
+        )
 
         # API Key 인증
         with gr.Accordion("🔐 개인 키 등록하기", open=False):
             gr.Markdown("질문에 대한 임베딩(벡터화)은 **OpenAI**의 텍스트 임베딩 모델을 활용하고, 최종 응답 생성을 위한 LLM은 **Gemini** 모델을 사용합니다.")
             openai_api_key_box = gr.Textbox(
-                placeholder="OpenAI API Key...", 
+                placeholder="OpenAI text-embedding-3-small 모델을 사용합니다.", 
                 type="password", 
                 show_label=True,
-                lines=1
+                lines=1,
+                label="OpenAI API Key"
             )
             gemini_api_key_box = gr.Textbox(
-                placeholder="Gemini API Key...", 
+                placeholder="Gemini gemini-2.5-flash 모델을 사용합니다.", 
                 type="password", 
                 show_label=True,
-                lines=1
+                lines=1,
+                label="Gemini API Key"
             )
             key_submit_button = gr.Button("인증하기")
             key_status = gr.Textbox(
@@ -265,13 +313,14 @@ def main():
             with gr.Column(scale=1):
                 # 입력창 정의
                 input_box = gr.Textbox(
-                    label="질문",
                     placeholder="질문을 입력하세요...",
-                    lines=6,
-                    max_lines=20,
-                    scale=1,
+                    lines=20,
+                    # max_lines=100,
+                    # scale=1,
                     show_label=False,
-                    autofocus=True
+                    autofocus=True,
+                    autoscroll=True,
+                    elem_id="input-box"
                 )
 
                 # 예제 버튼 영역
@@ -282,8 +331,23 @@ def main():
                     "자존감이 떨어지고, 마음이 늘 불안합니다. 어떻게 해야 할까요?"
                 ]
                 with gr.Row():
-                    for idx, question in enumerate(example_questions):
-                        btn = gr.Button(value=question)
+                    for question in example_questions[:2]:
+                        btn = gr.Button(
+                            value=question, 
+                            scale=1,
+                            elem_classes="same-height"
+                        )
+                        btn.click(
+                            fn=lambda q=question: q,  # 기본값으로 클로저 문제 해결
+                            outputs=[input_box],
+                        )
+                with gr.Row():
+                    for question in example_questions[2:]:
+                        btn = gr.Button(
+                            value=question, 
+                            scale=1,
+                            elem_classes="same-height"
+                        )
                         btn.click(
                             fn=lambda q=question: q,  # 기본값으로 클로저 문제 해결
                             outputs=[input_box],
@@ -294,10 +358,12 @@ def main():
                     send_button = gr.Button("질문하기", variant="primary", scale=1)
 
             with gr.Column(scale=2):
-                recent_answer = gr.Textbox(label="답변", interactive=False, lines=5)
-
-        with gr.Accordion("📜 이전 대화 보기", open=False):
-            chatbot_display = gr.Chatbot(label="대화 히스토리", value=[], show_copy_button=True)
+                chatbot = gr.Chatbot(
+                    show_label=False, 
+                    value=[], 
+                    show_copy_button=True,
+                    elem_id="chatbot-box"
+                )
 
         gr.Markdown("🛠️ LangChain · OpenAI · Gemini · Chroma · Gradio", elem_id="tool-badge")
         
@@ -305,14 +371,7 @@ def main():
         send_button.click(
             fn=get_response,
             inputs=[input_box, history, chain],
-            outputs=[recent_answer, history, chain]
-        )
-
-        # 대화 히스토리 관리
-        send_button.click(
-            fn=get_history,
-            inputs=[history],
-            outputs=[chatbot_display]
+            outputs=[chatbot, history, chain, input_box],
         )
         
     # 데모 실행
@@ -320,5 +379,4 @@ def main():
 
 
 if __name__ == "__main__":
-    
     main()
