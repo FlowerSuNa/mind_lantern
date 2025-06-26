@@ -1,0 +1,45 @@
+.same-height { height: 100px !important; }
+
+#input-box {
+    display: flex;
+    flex-direction: column;
+    height: 300px;
+}
+
+#input-box textarea {
+    height: 270px;
+    overflow-y: auto;
+    resize: none;
+    padding: 12px;
+    font-size: 16px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+}
+        
+#chatbot-box {
+    height: 500px !important;
+    overflow-y: auto !important;
+}
+
+@media (max-width: 768px) {
+    #input-box {
+        height: 200px;
+    }
+    #input-box textarea {
+        height: 170px;
+        font-size: 15px;
+    }
+}
+
+.bounce-text {
+    display: inline-block;
+    animation: bounce 1s infinite;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
