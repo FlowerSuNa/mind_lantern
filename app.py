@@ -16,13 +16,7 @@ from langchain_core.prompts import (
     HumanMessagePromptTemplate,
     MessagesPlaceholder
 )
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.runnables import (
-    RunnableMap, 
-    RunnablePassthrough, 
-    RunnableLambda
-)
 from langchain_core.documents import Document
 from typing import List, Dict
 
@@ -39,7 +33,7 @@ if not os.path.exists("chroma_db"):
     with zipfile.ZipFile("chroma_db.zip", "r") as zip_ref:
         zip_ref.extractall("chroma_db")
 
-# ------------------------- Confirm and Load Model -------------------------
+# ------------------------- Load Model -------------------------
 
 def get_embeddings(api_key: str):
     """ 임베딩 모델 반환 """
@@ -57,8 +51,7 @@ def get_llm(api_key: str):
         temperature=0.1
     )
 
-
-# ------------------------- Chain Definition -------------------------
+# ------------------------- Tools -------------------------
 
 def get_retriever(embeddings: OpenAIEmbeddings):
     """ 검색기 반환 """
@@ -81,42 +74,28 @@ def get_retriever(embeddings: OpenAIEmbeddings):
     return retriever
 
 
-def parsing_documents(documents: List[Document]) -> Dict[str, str]:
-    """" 검색 결과를 파싱하여 출력 문자열과 URL 목록 반환 """
-    context, urls = [], []
-    for doc in documents:
-        content = f"주제 : {doc.metadata.get('title')}\n{doc.page_content}"
-        context.append(content)
-
-        info = f"[{doc.metadata.get('title')}]({doc.metadata.get('video_url')})"
-        urls.append(info)
-    return {
-        'context': '\n\n'.join(context),
-        'urls': '\n'.join(urls)
-    }
-
-
 def get_prompt():
     """ 프롬프트 정의 """
     system_template = dedent(
         """
-        당신은 법륜스님처럼 사람들의 고민을 경청하고, 따뜻하면서도 현실적인 조언을 주는 상담자입니다.
+        당신은 사람들의 고민을 경청하고, 따뜻하면서도 현실적인 조언을 주는 스님입니다.
         어떤 질문이 와도 판단하거나 비난하지 않고, 상대의 입장에서 공감하며 지혜로운 답변을 합니다.
         답변은 근본적인 깨달음을 전하려고 노력하세요.
+        [유튜브 출처/링크]는 출력하지 마세요.
         """
     ).strip()
     system_message = SystemMessagePromptTemplate.from_template(template=system_template)
 
     human_template = dedent(
         """
-        다음은 법륜스님의 즉문즉설 강연에서 발췌한 참고 내용입니다:
+        다음은 법륜 스님의 즉문즉설 강연에서 발췌한 참고 내용입니다:
 
         --- 참고 발언 시작 ---
         {context}
         --- 참고 발언 끝 ---
 
         위 내용을 참고하여, 아래 질문에 대해 스님 화법으로 답변하세요.
-
+        
         질문지 : {question}
 
         스님 : 
@@ -131,47 +110,19 @@ def get_prompt():
     ])
 
 
-def get_rag_chain(prompt, retriever, llm):
-    """ 체인 반환 """
-    context_chain = retriever | RunnableLambda(parsing_documents)
+def parsing_documents(documents: List[Document]) -> Dict[str, str]:
+    """" 검색 결과를 파싱하여 출력 문자열과 URL 목록 반환 """
+    context, urls = [], []
+    for doc in documents:
+        content = f"주제 : {doc.metadata.get('title')}\n{doc.page_content}"
+        context.append(content)
 
-    chain = RunnableMap({
-        "inputs": RunnablePassthrough(),
-        "context_data": lambda x: context_chain.invoke(x["question"])
-    }) | RunnableLambda(lambda x: {
-        **x["inputs"],
-        **x["context_data"]
-    }) | {
-        "inputs": RunnablePassthrough(),
-        "answer": prompt | llm | StrOutputParser()
-    } | RunnableLambda(
-        lambda x: x["answer"] + "\n\n[유튜브 출처/링크]\n" + x["inputs"]["urls"]   
-    )
-    return chain
-
-# ------------------------- Action Function -------------------------
-
-def confirm_api_key(openai_api_key: str, gemini_api_key: str):
-    """ API Key 검증 및 모델 로드 """
-
-    embeddings = get_embeddings(openai_api_key)
-    llm = get_llm(gemini_api_key)
-
-    try: 
-        retriever = get_retriever(embeddings)
-        llm.get_num_tokens('연결 테스트')
-        state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
-
-    except Exception as e:
-        print(e)
-        state = "❌ 올바른 API Key를 입력해주세요."
-        embeddings = get_embeddings(OPENAI_API_KEY)
-        retriever = get_retriever(embeddings)
-        llm = get_llm(GOOGLE_API_KEY)
-
-    prompt = get_prompt()
-    chain = get_rag_chain(prompt, retriever, llm)
-    return state, chain
+        info = f"[{doc.metadata.get('title')}]({doc.metadata.get('video_url')})"
+        urls.append(info)
+    return {
+        'context': '\n\n'.join(context),
+        'urls': '\n'.join(urls)
+    }
 
 
 def parsing_history(history: List):
@@ -202,40 +153,88 @@ def parsing_history(history: List):
 
     return pairs
 
+# ------------------------- Action Function -------------------------
 
-def get_history(message:str , history: List):
-    chatbot_display = parsing_history(history)
-    return chatbot_display.append((message, None))
+def confirm_api_key(openai_api_key: str, gemini_api_key: str):
+    """ API Key 검증 및 모델 로드 """
+
+    embeddings = get_embeddings(openai_api_key)
+    llm = get_llm(gemini_api_key)
+
+    try: 
+        retriever = get_retriever(embeddings)
+        llm.get_num_tokens('연결 테스트')
+        state = "✅ 키가 저장되었습니다. 이제 질문을 입력할 수 있어요!"
+
+    except Exception as e:
+        print(e)
+        state = "❌ 올바른 API Key를 입력해주세요."
+        embeddings = get_embeddings(OPENAI_API_KEY)
+        retriever = get_retriever(embeddings)
+        llm = get_llm(GOOGLE_API_KEY)
+
+    return state, retriever, llm
 
 
-async def get_response(message: str, history: List, chain):
-    if chain is None:
-        _, chain = confirm_api_key(OPENAI_API_KEY, GOOGLE_API_KEY)
+async def get_response(message: str, history: List, retriever, llm):
+    """ 답변 생성 함수 """
+    loop = asyncio.get_event_loop()
 
+    # 초기화
     input_box = gr.update(value=message, interactive=False)
-    chatbot_update = [(message, '<span class="bounce-text">🌀 답변 생성 중...</span>')]
+    chatbot_update = [(message, '<span class="bounce-text">🔄 초기화 중...</span>')]
     chatbot_display = parsing_history(history)
-    yield chatbot_display + chatbot_update, history, chain, input_box
-    try:
-        response = chain.astream(
-            {"question": message, "history": history}
+    yield chatbot_display + chatbot_update, history, retriever, llm, input_box
+    await asyncio.sleep(0.01)
+
+    if (retriever is None) or (llm is None):
+        _, retriever, llm = await loop.run_in_executor(
+            None,
+            lambda: confirm_api_key(OPENAI_API_KEY, GOOGLE_API_KEY)
         )
+        
+    # 상태 값 업데이트
+    chatbot_update = [(message, '<span class="bounce-text">🔍 참고자료 탐색 중...</span>')]
+    yield chatbot_display + chatbot_update, history, retriever, llm, input_box
+    await asyncio.sleep(0.01)
+
+    # 자료 탐색
+    retrieved = await loop.run_in_executor(None, retriever.invoke, message)
+    context = parsing_documents(retrieved)
+
+    # 상태 값 업데이트
+    chatbot_update = [(message, '<span class="bounce-text">🌀 답변 생성 중...</span>')]
+    yield chatbot_display + chatbot_update, history, retriever, llm, input_box
+    await asyncio.sleep(0.01)
+
+    # 답변 생성
+    try:
+        chain = get_prompt() | llm
+        response = chain.astream({
+            "question": message,
+            "history": history,
+            "context": context.get("context")
+        })
         full_response = ""
 
         async for chunk in response:
-            full_response += chunk
-            await asyncio.sleep(0.01)  # 너무 빠를 경우 살짝 지연
-            yield chatbot_display + chatbot_update, history, chain, input_box  # 부분 응답을 계속 출력
+            full_response += chunk.content
+            chatbot_update = [(message, full_response)]
+            await asyncio.sleep(0.01)
+            yield chatbot_display + chatbot_update, history, retriever, llm, input_box
 
     except Exception as e:
         print(e)
         full_response = "⚠️ API 사용량이 초과되었습니다."
 
+    # 최종 응답
+    full_response += "\n\n[유튜브 출처/링크]\n" + context.get("urls")
+
     input_box = gr.update(value="", interactive=True)
     history.append(HumanMessage(content=message))
     history.append(AIMessage(content=full_response))
     chatbot_display.append((message, full_response))
-    yield chatbot_display, history, chain, input_box # 최종 응답
+    yield chatbot_display, history, retriever, llm, input_box
 
 
 def main():
@@ -245,7 +244,7 @@ def main():
 
     with gr.Blocks(css=custom_css) as demo:
         history = gr.State([])
-        chain = gr.State(None)
+        retriever, llm = gr.State(None), gr.State(None)
 
         gr.Markdown('## 🤖 법륜스님 [즉문즉설] 스타일 지혜 받기')
         gr.Textbox(
@@ -286,7 +285,7 @@ def main():
             key_submit_button.click(
                 fn=confirm_api_key,
                 inputs=[openai_api_key_box, gemini_api_key_box],
-                outputs=[key_status, chain]
+                outputs=[key_status, retriever, llm]
             )
 
         # 채팅 창
@@ -351,8 +350,8 @@ def main():
         # 응답 생성
         send_button.click(
             fn=get_response,
-            inputs=[input_box, history, chain],
-            outputs=[chatbot, history, chain, input_box],
+            inputs=[input_box, history, retriever, llm],
+            outputs=[chatbot, history, retriever, llm, input_box],
         )
         
     # 데모 실행
