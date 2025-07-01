@@ -82,12 +82,7 @@ def get_prompt():
         어떤 질문이 와도 판단하거나 비난하지 않고, 상대의 입장에서 공감하며 지혜로운 답변을 합니다.
         답변은 근본적인 깨달음을 전하려고 노력하세요.
         [유튜브 출처/링크]는 출력하지 마세요.
-        """
-    ).strip()
-    system_message = SystemMessagePromptTemplate.from_template(template=system_template)
 
-    human_template = dedent(
-        """
         다음은 법륜 스님의 즉문즉설 강연에서 발췌한 참고 내용입니다:
 
         --- 참고 발언 시작 ---
@@ -95,7 +90,12 @@ def get_prompt():
         --- 참고 발언 끝 ---
 
         위 내용을 참고하여, 아래 질문에 대해 스님 화법으로 답변하세요.
-        
+        """
+    ).strip()
+    system_message = SystemMessagePromptTemplate.from_template(template=system_template)
+
+    human_template = dedent(
+        """        
         질문지 : {question}
 
         스님 : 
