@@ -22,3 +22,16 @@ dependencies = [
     "youtube-transcript-api>=1.2.3",
     "yt-dlp>=2025.12.8",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["chroma_db", "*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
