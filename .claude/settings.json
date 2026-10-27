@@ -16,7 +16,8 @@
     ],
     "deny": [
       "Read(./.env)",
-      "Read(./.env.*)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
       "Read(./credentials.json)",
       "Read(./client_secrets.json)",
       "Read(./settings.yaml)",
