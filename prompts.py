@@ -1,5 +1,3 @@
-from textwrap import dedent
-
 SUBTITLE_SUMMARY_SYSTEM_TEMPLATE = """
 당신은 법륜스님의 즉문즉설 자막을 요약하는 AI입니다. 
 당신의 작업은 다음과 같습니다:

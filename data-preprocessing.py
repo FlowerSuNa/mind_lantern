@@ -1,34 +1,22 @@
-import os
-import re
 import json
+import logging
+import os
+import warnings
 
-from typing import List, Dict, Any
-
+from dotenv import load_dotenv
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 
-import yt_dlp
-from yt_dlp.utils import DownloadError
-
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from prompts import SUBTITLE_SUMMARY_SYSTEM_TEMPLATE, SUBTITLE_SUMMARY_HUMAN_TEMPLATE
+from prompts import SUBTITLE_SUMMARY_HUMAN_TEMPLATE, SUBTITLE_SUMMARY_SYSTEM_TEMPLATE
 from utils import upload_to_drive
-
-import time
-from google.api_core.exceptions import ResourceExhausted
-
-import requests
-import warnings
-import logging
-
-from dotenv import load_dotenv
 
 load_dotenv()
 
-warnings.filterwarnings('ignore')
-logging.getLogger('yt_dlp').setLevel(logging.ERROR)
+warnings.filterwarnings("ignore")
+logging.getLogger("yt_dlp").setLevel(logging.ERROR)
 
 # Google Drive 인증 (브라우저 인증)
 GAUTH = GoogleAuth()
@@ -36,10 +24,7 @@ GAUTH.LocalWebserverAuth()
 DRIVE = GoogleDrive(GAUTH)
 
 # LLM 정의
-LLM = ChatGoogleGenerativeAI(
-    model="gemini-2.5-pro",
-    temperature=0.1
-)
+LLM = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.1)
 
 
 def summarize_subtitle(content: str) -> str:
@@ -52,17 +37,17 @@ def summarize_subtitle(content: str) -> str:
     Returns:
         str: 요약된 자막 문장(대화체 유지 및 필요 요약)
     """
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SUBTITLE_SUMMARY_SYSTEM_TEMPLATE),
-        ("human", SUBTITLE_SUMMARY_HUMAN_TEMPLATE)
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [("system", SUBTITLE_SUMMARY_SYSTEM_TEMPLATE), ("human", SUBTITLE_SUMMARY_HUMAN_TEMPLATE)]
+    )
     chain = prompt | LLM | StrOutputParser()
     return chain.invoke({"content": content})
+
 
 if __name__ == "__main__":
     import sys
 
-    playlist_id = sys.argv[1] # PLGiaCgd9PatfXH13hpDWkZrxDLq-vvGtj
+    playlist_id = sys.argv[1]  # PLGiaCgd9PatfXH13hpDWkZrxDLq-vvGtj
 
     google_dirve_rt_id = os.getenv("GOOGLE_DRIVE_RT_ID")
     google_dirve_vtt_id = os.getenv("GOOGLE_DRIVE_VTT_ID")
@@ -70,9 +55,11 @@ if __name__ == "__main__":
 
     # 자막 데이터 파일 탐색
     google_dirve_txt_id = os.getenv("GOOGLE_DRIVE_TXT_ID")
-    file = DRIVE.ListFile({
-        'q': f"'{google_dirve_txt_id}' in parents and title = '{playlist_id}.json' and trashed = false"
-    }).GetList()
+    file = DRIVE.ListFile(
+        {
+            "q": f"'{google_dirve_txt_id}' in parents and title = '{playlist_id}.json' and trashed = false"
+        }
+    ).GetList()
 
     # 자막 데이터 로드
     if file:
@@ -80,7 +67,7 @@ if __name__ == "__main__":
 
     print(f"📂 자막 데이터 로드 완료 : {len(original_contents)}개")
 
-    # 초기화 
+    # 초기화
     local_json_path = f"{playlist_id}.json"
     if os.path.exists(local_json_path):
         # 중간 저장된 데이터 로드
@@ -98,7 +85,7 @@ if __name__ == "__main__":
     # 데이터 저장
 
     upload_to_drive(
-        f'{playlist_id}.json', 
-        json.dumps(contents, ensure_ascii=False, indent=2), 
-        google_dirve_txt_id
+        f"{playlist_id}.json",
+        json.dumps(contents, ensure_ascii=False, indent=2),
+        google_dirve_txt_id,
     )
