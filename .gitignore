@@ -4,5 +4,12 @@
 *.vtt
 *.txt
 *.json
+!.claude/settings.json
 
-uv.lock
+# Python
+__pycache__/
+*.pyc
+
+# Claude Code 개인 설정 (커밋하지 않음)
+CLAUDE.local.md
+.claude/settings.local.json
