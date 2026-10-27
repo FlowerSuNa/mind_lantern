@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydrive.drive import GoogleDrive
+from pydrive2.drive import GoogleDrive
 
 
 def upload_to_drive(drive: GoogleDrive, google_drive_id: str, filename: str, data: Any) -> None:

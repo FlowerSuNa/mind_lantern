@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 from youtube_transcript_api import YouTubeTranscriptApi
 from yt_dlp.utils import DownloadError
 
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     ydl = yt_dlp.YoutubeDL(ydl_opts)
 
     # 유튜브 영상에서 자막(트랜스크립트) 추출 체인 정의
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
+    llm = ChatGoogleGenerativeAI(model=os.getenv("CHAT_MODEL", "gemini-2.5-flash"), temperature=0.1)
     transcript_chain = (
         ChatPromptTemplate.from_messages(
             [
@@ -145,8 +145,8 @@ if __name__ == "__main__":
         video_id = entry["id"]
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        raw = YouTubeTranscriptApi.get_transcript(video_id, languages=["ko"])
-        transcript = "\n".join([item["text"] for item in raw])
+        fetched = YouTubeTranscriptApi().fetch(video_id, languages=["ko"])
+        transcript = "\n".join(snippet.text for snippet in fetched)
         print(f"{video_id} [{len(transcript)}]")
         print("---" * 20)
         print(transcript[:10])
@@ -154,16 +154,16 @@ if __name__ == "__main__":
         try:
             info_dict = ydl.extract_info(video_url, download=False)
         except DownloadError as e:
-            print(f"❌ 다운로드 에러 : {video_url} | 사유: {e}")
+            print(f"✗ 다운로드 에러 : {video_url} | 사유: {e}")
             continue
 
         title = info_dict.get("title")
 
         if "몰아보기" in title:
-            print(f"❌ 몰아보기 영상 스킵 : {video_url}")
+            print(f"✗ 몰아보기 영상 스킵 : {video_url}")
             continue
         elif not title:
-            print(f"❌ 영상 정보 없음 : {video_url}")
+            print(f"✗ 영상 정보 없음 : {video_url}")
             continue
 
         # 자막 추출
@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
             else:
                 # 자막 추출 실패 시 LLM으로 자막 추출
-                print(f"💡 LLM으로 자막 추출 : {video_url}")
+                print(f"※ LLM으로 자막 추출 : {video_url}")
                 subtitle = transcript_chain.invoke({"video_url": video_url})
 
             contents[video_id] = {
@@ -189,7 +189,7 @@ if __name__ == "__main__":
                 "subtitles_ko": subtitle,
             }
         except Exception as e:
-            print(f"❌ 자막 파싱 에러 : {video_url} | 사유: {e}")
+            print(f"✗ 자막 파싱 에러 : {video_url} | 사유: {e}")
             continue
 
     # 데이터 저장
@@ -201,4 +201,4 @@ if __name__ == "__main__":
             json.dumps(contents, ensure_ascii=False, indent=2),
         )
     else:
-        print(f"❗ 데이터 없음 : {playlist_id}")
+        print(f"⚠︎ 데이터 없음 : {playlist_id}")

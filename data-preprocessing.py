@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 
 from prompts import SUBTITLE_SUMMARY_HUMAN_TEMPLATE, SUBTITLE_SUMMARY_SYSTEM_TEMPLATE
 from utils import upload_to_drive
@@ -24,7 +24,7 @@ GAUTH.LocalWebserverAuth()
 DRIVE = GoogleDrive(GAUTH)
 
 # LLM 정의
-LLM = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.1)
+LLM = ChatGoogleGenerativeAI(model=os.getenv("SUMMARY_MODEL", "gemini-2.5-pro"), temperature=0.1)
 
 
 def summarize_subtitle(content: str) -> str:
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     if file:
         original_contents = json.loads(file[0].GetContentString())
 
-    print(f"📂 자막 데이터 로드 완료 : {len(original_contents)}개")
+    print(f"✓ 자막 데이터 로드 완료 : {len(original_contents)}개")
 
     # 초기화
     local_json_path = f"{playlist_id}.json"
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         # 중간 저장된 데이터 로드
         with open(local_json_path, "r", encoding="utf-8") as f:
             contents = json.load(f)
-        print(f"📂 가공 데이터 로드 완료 : {len(contents)}개")
+        print(f"✓ 가공 데이터 로드 완료 : {len(contents)}개")
     else:
         contents = {}
 
